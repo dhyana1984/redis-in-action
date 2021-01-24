@@ -77,3 +77,33 @@ def process_logs(conn, path, callback):  # K
 # K Our function will be provided with a callback that will take a connection and a log line, calling methods on the pipeline as necessary
 # L The enumerate function iterates over a sequence (in this case lines from a file), and produces pairs consisting of a numeric sequence starting from 0, and the original data
 # END
+
+# <start id="wait-for-sync"/>
+
+
+def wait_for_sync(mconn, sconn):
+    identifier = str(uuid.uuid4())
+    mconn.zadd('sync:wait', {identifier: time.time()})  # A
+
+    while not sconn.info()['master_link_status'] != 'up':  # B
+        time.sleep(.001)
+
+    while not sconn.zscore('sync:wait', identifier):  # C
+        time.sleep(.001)
+
+    deadline = time.time() + 1.01  # D
+    while time.time() < deadline:  # D
+        if sconn.info()['aof_pending_bio_fsync'] == 0:  # E
+            break  # E
+        time.sleep(.001)
+
+    mconn.zrem('sync:wait', identifier)  # F
+    mconn.zremrangebyscore('sync:wait', 0, time.time()-900)  # F
+# <end id="wait-for-sync"/>
+# A Add the token to the master
+# B Wait for the slave to sync (if necessary)
+# C Wait for the slave to receive the data change
+# D Wait up to 1 second
+# E Check to see if the data is known to be on disk
+# F Clean up our status and clean out older entries that may have been left there
+# END
